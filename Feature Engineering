@@ -1,0 +1,78 @@
+import pandas as pd
+import seaborn as sns
+import numpy as np
+import re
+import string
+import nltk 
+import joblib
+import torch
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from gensim.models import Word2Vec
+from transformers import BertTokenizer
+from transformers import BertModel
+
+df = pd.read_csv("amazon_reviews_processed.csv")
+
+df1 = df.copy()
+
+#TF-IDF Feature Engineering
+tfidf = TfidfVectorizer(
+    max_features = 5000 
+)
+
+X_tfidf = tfidf.fit_transform(
+    df1['processed_text']
+)
+
+print(X_tfidf.shape)
+
+#View important words
+feature_names = tfidf.get_feature_names_out()
+print(feature_names[:20])
+
+#Tokenization
+sentences = df1['processed_text'].apply(
+    lambda x: x.split()
+)
+
+#Training model
+w2v_model = Word2Vec(
+    sentences,
+    vector_size = 100,
+    window = 5,
+    min_count = 2,
+    workers = 4
+)
+
+#Check vocabulary size
+print(len(w2v_model.wv.key_to_index))
+
+#Show first 50 words in vocabulary
+list(w2v_model.wv.key_to_index.keys())[:50]
+
+w2v_model.wv['romance']
+
+#Review Embeddings
+#Average word vectors
+def document_vector(doc):
+    
+    words = doc.split()
+
+    vectors = [
+        w2v_model.wv[word]
+        for word in words
+        if word in w2v_model.wv
+    ]
+
+    if len(vectors) == 0:
+        return np.zeros(100)
+
+    return np.mean(vectors, axis = 0)
+
+X_word2vec = np.array(
+    df1['processed_text'].apply(document_vector).tolist()
+)
+
+print(X_word2vec.shape)
+
