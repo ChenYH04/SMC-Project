@@ -1,0 +1,256 @@
+import pandas as pd
+import spacy
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    classification_report,
+    confusion_matrix
+)
+
+# Initialize VADER
+sia = SentimentIntensityAnalyzer()
+nlp = spacy.load("en_core_web_sm")
+
+df = pd.read_csv("all_kindle_review.csv")
+
+df1 = df.copy()
+
+# Change column name if needed
+texts = df1["reviewText"].fillna("").tolist()
+
+stop_aspects = {
+    # Pronouns
+    "i", "me", "my", "mine",
+    "you", "your",
+    "he", "him", "his",
+    "she", "her",
+    "we", "us", "our",
+    "they", "them", "their",
+    "it", "its",
+
+    # Demonstratives
+    "this", "that",
+    "these", "those",
+
+    # Vague references
+    "something", "anything",
+    "everything", "nothing",
+    "someone", "anyone",
+    "everyone",
+
+    # Generic placeholders
+    "thing", "things",
+    "stuff",
+
+    # Quantifiers
+    "all", "many",
+    "some", "few"
+}
+
+generic_words = {
+    "book",
+    "novel",
+    "review"
+}
+
+# ==========================================
+# Aspect Extraction + Sentiment
+# ==========================================
+def extract_aspects_and_sentiment(text):
+
+    doc = nlp(text)
+
+    aspect_sentiments = []
+
+    for chunk in doc.noun_chunks:
+
+        # ----------------------------------
+        # Clean aspect using lemmatization
+        # ----------------------------------
+        aspect = " ".join(
+            token.lemma_.lower()
+            for token in chunk
+        ).strip()
+
+        # ----------------------------------
+        # Filtering Rules
+        # ----------------------------------
+
+        # Remove pronoun-root chunks
+        if chunk.root.pos_ == "PRON":
+            continue
+
+        # Remove chunks starting with pronouns
+        if chunk[0].pos_ == "PRON":
+            continue
+
+        # Remove stop aspects
+        if aspect in stop_aspects:
+            continue
+
+        # Remove generic review words
+        if aspect in generic_words:
+            continue
+
+        # Remove very short aspects
+        if len(aspect) <= 2:
+            continue
+
+        # Must contain a noun/proper noun
+        if not any(
+            token.pos_ in ["NOUN", "PROPN"]
+            for token in chunk
+        ):
+            continue
+
+        # Remove extremely long chunks
+        if len(aspect.split()) > 4:
+            continue
+
+        # Remove pure person names
+        if all(
+            token.pos_ == "PROPN"
+            for token in chunk
+        ):
+            continue
+
+        # ----------------------------------
+        # Sentiment Analysis
+        # ----------------------------------
+        # Use the sentence containing the aspect
+        # instead of the noun phrase itself
+        context = chunk.sent.text
+
+        scores = sia.polarity_scores(context)
+
+        compound = scores["compound"]
+
+        if compound >= 0.05:
+            sentiment = "Positive"
+        elif compound <= -0.05:
+            sentiment = "Negative"
+        else:
+            sentiment = "Neutral"
+
+        aspect_sentiments.append(
+            (
+                aspect,
+                sentiment,
+                round(compound, 4)
+            )
+        )
+
+    # Remove duplicates
+    aspect_sentiments = list(set(aspect_sentiments))
+
+    return aspect_sentiments
+
+# =========================
+# Process dataset
+# =========================
+results = []
+
+for text in texts:
+
+    aspect_sentiment_pairs = extract_aspects_and_sentiment(text)
+
+    results.append({
+        "text": text,
+        "aspect_sentiment_pairs": aspect_sentiment_pairs
+    })
+
+# ==========================================
+# Create DataFrame
+# ==========================================
+results_df1 = pd.DataFrame(results)
+
+print(results_df1.head(10))
+
+print("\nVADER Opinion Mining Complete!")
+
+results_df1.to_csv("vader_output.csv", index=False)
+print("Results saved to: vader_absa_clean_final.csv")
+
+# ==================================
+# Evaluation
+# ==================================
+predictions = []
+
+for text in df1["reviewText"]:
+
+    score = sia.polarity_scores(text)
+
+    compound = score["compound"]
+
+    if compound >= 0.05:
+        pred = "Positive"
+    elif compound <= -0.05:
+        pred = "Negative"
+    else:
+        pred = "Neutral"
+
+    predictions.append(pred)
+
+def rating_to_sentiment(rating):
+    if rating >= 4:
+        return "Positive"
+    elif rating == 3:
+        return "Neutral"
+    else:
+        return "Negative"
+
+df1["label"] = df1["rating"].apply(rating_to_sentiment)
+
+y_true = df1["label"]
+y_pred = predictions
+
+print("Accuracy:")
+print(accuracy_score(y_true, y_pred))
+
+print("\nPrecision:")
+print(
+    precision_score(
+        y_true,
+        y_pred,
+        average="weighted"
+    )
+)
+
+print("\nRecall:")
+print(
+    recall_score(
+        y_true,
+        y_pred,
+        average="weighted"
+    )
+)
+
+print("\nF1:")
+print(
+    f1_score(
+        y_true,
+        y_pred,
+        average="weighted"
+    )
+)
+
+print("\nClassification Report:")
+print(
+    classification_report(
+        y_true,
+        y_pred
+    )
+)
+
+print("\nConfusion Matrix:")
+print(
+    confusion_matrix(
+        y_true,
+        y_pred
+    )
+)
