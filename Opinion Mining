@@ -1,0 +1,194 @@
+import pandas as pd
+import spacy
+
+# English NLP model
+nlp = spacy.load('en_core_web_sm')
+
+df = pd.read_csv('all_kindle_review.csv')
+
+df1 = df.copy()
+
+texts = df1["reviewText"].fillna("").tolist()
+
+# Lexicons
+positive_words = {
+    "good", "great", "excellent", "amazing",
+    "love", "like", "enjoy", "favorite",
+    "awesome", "fantastic", "wonderful",
+    "recommend", "interesting", "engaging",
+    "informative", "entertaining", "funny"
+}
+
+negative_words = {
+    "bad", "terrible", "hate", "awful",
+    "worst", "boring", "poor",
+    "disappointing", "annoying",
+    "confusing", "slow", "predictable"
+}
+
+# =========================
+# Implicit opinion patterns
+# =========================
+implicit_positive_phrases = {
+    "couldn't put it down",
+    "could not put it down",
+    "finished it in one sitting",
+    "highly recommend",
+    "worth reading"
+}
+
+implicit_negative_phrases = {
+    "waste of time",
+    "couldn't finish",
+    "could not finish",
+    "hard to follow"
+}
+
+# =========================
+# Generic targets filter
+# =========================
+generic_targets = {
+    "it", "thing", "things",
+    "way", "reason", "something",
+    "anything", "everything",
+    "person", "time", "one"
+}
+
+# ==========================================
+# Opinion Mining Function
+# ==========================================
+def extract_opinions(doc):
+
+    opinion_target_pairs = []
+
+    text_lower = doc.text.lower()
+
+    # ======================================
+    # 1. Implicit Phrase Detection
+    # ======================================
+    for phrase in implicit_positive_phrases:
+        if phrase in text_lower:
+            opinion_target_pairs.append(
+                ("implicit_positive", phrase, "document")
+            )
+
+    for phrase in implicit_negative_phrases:
+        if phrase in text_lower:
+            opinion_target_pairs.append(
+                ("implicit_negative", phrase, "document")
+            )
+
+    # ======================================
+    # 2. Explicit Opinion Extraction
+    # ======================================
+    for token in doc:
+
+        word = token.text.lower()
+
+        if word not in positive_words and word not in negative_words:
+            continue
+
+        # ==================================
+        # Negation Handling
+        # ==================================
+        negated = any(
+            child.dep_ == "neg"
+            for child in token.children
+        )
+
+        if word in positive_words:
+
+            polarity = (
+                "negative"
+                if negated
+                else "positive"
+            )
+
+        else:
+
+            polarity = (
+                "positive"
+                if negated
+                else "negative"
+            )
+
+        target = None
+
+        # ==================================
+        # Pattern 1: adjective modifier
+        # Example: great story
+        # ==================================
+        if token.dep_ == "amod":
+
+            head = token.head
+
+            if (
+                head.pos_ in ["NOUN", "PROPN"]
+                and head.lemma_.lower() not in generic_targets
+            ):
+                target = head.lemma_.lower()
+
+        # ==================================
+        # Pattern 2: story is great
+        # ==================================
+        elif token.dep_ in ["acomp", "attr"]:
+
+            for child in token.head.children:
+
+                if (
+                    child.dep_ in ["nsubj", "nsubjpass"]
+                    and child.pos_ in ["NOUN", "PROPN"]
+                    and child.lemma_.lower() not in generic_targets
+                ):
+                    target = child.lemma_.lower()
+                    break
+
+        # ==================================
+        # Pattern 3: love book
+        # ==================================
+        elif token.pos_ == "VERB":
+
+            for child in token.children:
+
+                if (
+                    child.dep_ in ["dobj", "obj"]
+                    and child.pos_ in ["NOUN", "PROPN"]
+                    and child.lemma_.lower() not in generic_targets
+                ):
+                    target = child.lemma_.lower()
+                    break
+
+        # ==================================
+        # Store Result
+        # ==================================
+        opinion_target_pairs.append(
+            (
+                polarity,
+                word,
+                target
+            )
+        )
+
+    return list(set(opinion_target_pairs))
+
+# ==========================================
+# Process Dataset
+# ==========================================
+results = []
+
+for doc in nlp.pipe(texts, batch_size=100):
+
+    pairs = extract_opinions(doc)
+
+    results.append({
+        "text": doc.text,
+        "opinion_target_pairs": pairs
+    })
+
+results_df1 = pd.DataFrame(results)
+
+print(results_df1.head())
+
+print("\nOpinion Mining Complete!")
+
+results_df1.to_csv("opinion-mining-output.csv", index=False)
