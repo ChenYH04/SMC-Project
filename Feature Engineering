@@ -9,8 +9,6 @@ import torch
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from gensim.models import Word2Vec
-from transformers import BertTokenizer
-from transformers import BertModel
 
 df = pd.read_csv("amazon_reviews_processed.csv")
 
